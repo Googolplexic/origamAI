@@ -3,7 +3,7 @@ from fold_convert_class import FoldConverter as fc
 import json
 
 if __name__ == "__main__":
-    file_name = "input.fold"
+    file_name = "input2.fold"
     try:
         with open(file_name, 'r') as file:
             fold_data = json.load(file)

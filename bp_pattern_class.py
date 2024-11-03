@@ -40,44 +40,6 @@ class Crease:
     type: CreaseType
 
 
-class FOLDConverter:
-    """Handles conversion between BoxPleatingPattern and FOLD format"""
-
-    @staticmethod
-    def assignment_to_crease_type(assignment: str) -> CreaseType:
-        """Convert FOLD assignment to CreaseType"""
-        if assignment == "M":
-            return CreaseType.MOUNTAIN
-        elif assignment == "V":
-            return CreaseType.VALLEY
-        elif assignment == "B":
-            return CreaseType.BORDER
-        else:
-            return CreaseType.NONE
-
-    @staticmethod
-    def crease_type_to_assignment(crease_type: CreaseType) -> str:
-        """Convert CreaseType to FOLD assignment"""
-        if crease_type == CreaseType.MOUNTAIN:
-            return "M"
-        elif crease_type == CreaseType.VALLEY:
-            return "V"
-        elif crease_type == CreaseType.BORDER:
-            return "B"
-        else:
-            return "F"  # Flat/unassigned
-
-    @staticmethod
-    def crease_type_to_fold_angle(crease_type: CreaseType) -> float:
-        """Convert CreaseType to fold angle"""
-        if crease_type == CreaseType.MOUNTAIN:
-            return -180.0
-        elif crease_type == CreaseType.VALLEY:
-            return 180.0
-        else:
-            return 0.0
-
-
 class BoxPleatingPattern:
     def __init__(self, grid_size: int = None):
         """Initialize a box-pleating pattern with optional grid size."""
@@ -246,26 +208,54 @@ class BoxPleatingPattern:
 
     def _calculate_angles(self, vertex: Point, vertex_creases: List[Crease]) -> List[float]:
         """
-        Calculate angles between creases at a vertex.
+        Calculate angles between creases at a vertex in cyclic order.
         Returns angles in degrees, sorted counterclockwise.
         """
         if len(vertex_creases) < 2:
             return []
 
-        # Sort vectors counterclockwise and maintain crease association
-        vec_crease_pairs = self._sort_vectors_counterclockwise(vertex, vertex_creases)
-        vectors = [v for v, _ in vec_crease_pairs]
+        # Convert creases to vectors and sort them cyclically
+        vectors_and_creases = []
+        for crease in vertex_creases:
+            # Always create vector pointing away from vertex
+            if crease.start == vertex:
+                vec = np.array([crease.end.x - vertex.x, crease.end.y - vertex.y])
+            else:
+                vec = np.array([crease.start.x - vertex.x, crease.start.y - vertex.y])
+            vectors_and_creases.append((vec, crease))
 
-        # Calculate angles between consecutive vectors
+        # Sort vectors by angle relative to positive x-axis
+        angles_and_pairs = []
+        for vec, crease in vectors_and_creases:
+            angle = np.arctan2(vec[1], vec[0])
+            # Normalize angle to [0, 2π)
+            if angle < 0:
+                angle += 2 * np.pi
+            angles_and_pairs.append((angle, (vec, crease)))
+        
+        # Sort by angle
+        sorted_pairs = sorted(angles_and_pairs, key=lambda x: x[0])
+        sorted_vectors = [pair[1][0] for pair in sorted_pairs]
+
+        # Calculate consecutive angles between vectors
         angles = []
-        for i in range(len(vectors)):
-            v1 = vectors[i]
-            v2 = vectors[(i + 1) % len(vectors)]
-            angle = self._calculate_angle_between_vectors(v1, v2)
-            angles.append(angle)
+        for i in range(len(sorted_vectors)):
+            v1 = sorted_vectors[i]
+            v2 = sorted_vectors[(i + 1) % len(sorted_vectors)]
+            
+            # Calculate angle between vectors using dot product
+            dot_product = np.dot(v1, v2)
+            norms_product = np.linalg.norm(v1) * np.linalg.norm(v2)
+            
+            # Handle numerical precision
+            cos_theta = np.clip(dot_product / norms_product, -1.0, 1.0)
+            angle = np.arccos(cos_theta)
+            
+            # Convert to degrees
+            angle_degrees = np.degrees(angle)
+            angles.append(angle_degrees)
 
         return angles
-
 
     def check_kawasaki_theorem(self, vertex: Point) -> Tuple[bool, Dict]:
         """
@@ -294,17 +284,16 @@ class BoxPleatingPattern:
                 "min_required": 4,
             }
 
-        # Calculate angles between creases
+        # Calculate angles between creases in cyclic order
         angles = self._calculate_angles(vertex, vertex_creases)
-        angles.sort()  # Sort for consistent comparison
 
-        # Sum alternate angles
-        sum_odd = sum(angles[1::2])
-        sum_even = sum(angles[::2])
+        # For Kawasaki's theorem, we need alternating sums
+        sum_odd = sum(angles[1::2])  # Sum of odd-indexed angles
+        sum_even = sum(angles[::2])  # Sum of even-indexed angles
         angle_difference = abs(sum_odd - sum_even)
 
-        # Allow for small floating point imprecision
-        is_satisfied = angle_difference < 0.001
+        # Allow for small numerical imprecision (0.1 degrees)
+        is_satisfied = angle_difference < 0.1
 
         return is_satisfied, {
             "is_edge_vertex": False,
