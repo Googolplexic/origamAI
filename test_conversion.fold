@@ -1,0 +1,76 @@
+{
+  "file_spec": 1.1,
+  "file_creator": "BoxPleatingPattern Converter",
+  "file_classes": [
+    "creasePattern"
+  ],
+  "frame_classes": [
+    "creasePattern"
+  ],
+  "vertices_coords": [
+    [
+      -80.0,
+      -80.0
+    ],
+    [
+      -80.0,
+      80.0
+    ],
+    [
+      80.0,
+      80.0
+    ],
+    [
+      80.0,
+      -80.0
+    ]
+  ],
+  "edges_vertices": [
+    [
+      0,
+      1
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      3,
+      0
+    ]
+  ],
+  "edges_assignment": [
+    "M",
+    "V",
+    "M",
+    "V"
+  ],
+  "edges_foldAngle": [
+    -180,
+    180,
+    -180,
+    180
+  ],
+  "vertices_vertices": [
+    [
+      1,
+      3
+    ],
+    [
+      0,
+      2
+    ],
+    [
+      1,
+      3
+    ],
+    [
+      0,
+      2
+    ]
+  ]
+}

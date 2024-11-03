@@ -4,6 +4,7 @@ import numpy as np
 from dataclasses import dataclass
 from enum import Enum
 
+
 class CreaseType(Enum):
     NONE = 0
     MOUNTAIN = 1
@@ -15,21 +16,22 @@ class CreaseType(Enum):
 class Point:
     x: float  # Changed to float for FOLD compatibility
     y: float
-    
+
     def __hash__(self):
         return hash((self.x, self.y))
-    
+
     def to_list(self) -> List[float]:
         return [self.x, self.y]
-    
+
     def __eq__(self, other):
         if not isinstance(other, Point):
             return False
         return self.x == other.x and self.y == other.y
 
     @classmethod
-    def from_list(cls, coords: List[float]) -> 'Point':
+    def from_list(cls, coords: List[float]) -> "Point":
         return cls(coords[0], coords[1])
+
 
 @dataclass
 class Crease:
@@ -37,9 +39,10 @@ class Crease:
     end: Point
     type: CreaseType
 
+
 class FOLDConverter:
     """Handles conversion between BoxPleatingPattern and FOLD format"""
-    
+
     @staticmethod
     def assignment_to_crease_type(assignment: str) -> CreaseType:
         """Convert FOLD assignment to CreaseType"""
@@ -84,72 +87,18 @@ class BoxPleatingPattern:
         self.grid = None
         if grid_size is not None:
             self.grid = np.zeros((grid_size + 1, grid_size + 1), dtype=int)
+
     def __str__(self):
         """Return a string representation of the pattern."""
 
-
-        creases_str = ', '.join([f"({c.start.x}, {c.start.y}) -> ({c.end.x}, {c.end.y}) [{c.type.name}]" for c in self.creases])
-        vertices_str = ', '.join([f"({v.x}, {v.y})" for v in self.vertices])
-        return (f"BoxPleatingPattern(grid_size={self.grid_size}, creases=[{creases_str}], vertices=[{vertices_str}])")
-
-    
-    @classmethod
-    def from_fold(cls, fold_data: Dict) -> 'BoxPleatingPattern':
-        """Create a BoxPleatingPattern from FOLD format data"""
-        pattern = cls()
-        
-        # Convert vertices
-        pattern.vertices = [Point.from_list(coords) 
-            for coords in fold_data['vertices_coords']]
-        
-        # Convert edges/creases
-        for i, (v1_idx, v2_idx) in enumerate(fold_data['edges_vertices']):
-            assignment = fold_data['edges_assignment'][i]
-            crease_type = FOLDConverter.assignment_to_crease_type(assignment)
-            pattern.creases.append(Crease(
-                pattern.vertices[v1_idx],
-                pattern.vertices[v2_idx],
-                crease_type
-            ))
-        
-        return pattern
-
-    def to_fold(self) -> Dict:
-        """Convert the pattern to FOLD format"""
-        # Create vertices coords list and build vertex mapping
-        vertex_to_idx = {}
-        vertices_coords = []
-        for i, vertex in enumerate(self.vertices):
-            vertex_to_idx[vertex] = i
-            vertices_coords.append(vertex.to_list())
-        
-        # Create edges data
-        edges_vertices = []
-        edges_assignment = []
-        edges_foldAngle = []
-        
-        for crease in self.creases:
-            v1_idx = vertex_to_idx[crease.start]
-            v2_idx = vertex_to_idx[crease.end]
-            edges_vertices.append([v1_idx, v2_idx])
-            
-            assignment = FOLDConverter.crease_type_to_assignment(crease.type)
-            edges_assignment.append(assignment)
-            
-            fold_angle = FOLDConverter.crease_type_to_fold_angle(crease.type)
-            edges_foldAngle.append(fold_angle)
-        
-        # Create FOLD format dictionary
-        fold_data = {
-            "file_spec": 1.1,
-            "file_creator": "box_pleating_ai",
-            "vertices_coords": vertices_coords,
-            "edges_vertices": edges_vertices,
-            "edges_assignment": edges_assignment,
-            "edges_foldAngle": edges_foldAngle
-        }
-        
-        return fold_data
+        creases_str = "\n".join(
+            [
+                f"({c.start.x}, {c.start.y}) -> ({c.end.x}, {c.end.y}) [{c.type.name}]"
+                for c in self.creases
+            ]
+        )
+        vertices_str = "\n".join([f"({v.x}, {v.y})" for v in self.vertices])
+        return f"BoxPleatingPattern(\n\ngrid_size={self.grid_size}\n\ncreases=[{creases_str}]\n\nvertices=[{vertices_str}])"
 
     def add_crease(self, start: Point, end: Point, crease_type: CreaseType) -> bool:
         """Add a crease between two points if it follows box-pleating rules."""
@@ -170,8 +119,12 @@ class BoxPleatingPattern:
     def _is_valid_crease(self, start: Point, end: Point) -> bool:
         """Check if a proposed crease follows box-pleating rules."""
         # Check if points are within grid
-        if not (0 <= start.x <= self.grid_size and 0 <= start.y <= self.grid_size and
-                0 <= end.x <= self.grid_size and 0 <= end.y <= self.grid_size):
+        if not (
+            0 <= start.x <= self.grid_size
+            and 0 <= start.y <= self.grid_size
+            and 0 <= end.x <= self.grid_size
+            and 0 <= end.y <= self.grid_size
+        ):
             return False
 
         # Check if it's a 45° or 90° angle
@@ -190,93 +143,221 @@ class BoxPleatingPattern:
         self.grid[start.x, start.y] = 1
         self.grid[end.x, end.y] = 1
 
-    def check_maekawa_theorem(self, vertex: Point) -> bool:
-        """Check if Maekawa's theorem is satisfied at a vertex."""
+    def check_maekawa_theorem(self, vertex: Point) -> Tuple[bool, Dict]:
+        """
+        Check if Maekawa's theorem is satisfied at a vertex.
+        Returns (is_satisfied, details_dict)
+        
+        Maekawa's theorem states that at any vertex, the difference between 
+        the number of mountain and valley creases must be 2.
+        """
         mountain_count = 0
         valley_count = 0
-        if vertex.x == 0 or vertex.y == 0 or vertex.x == self.grid_size or vertex.y == self.grid_size:
-            # Edge vertex
-            return True
+        connected_creases = []
 
+        # Edge vertices are always valid for our purposes
+        if (vertex.x == 0 or vertex.y == 0 or 
+            vertex.x == self.grid_size or 
+            vertex.y == self.grid_size):
+            return True, {
+                "is_edge_vertex": True,
+                "mountain_count": 0,
+                "valley_count": 0,
+                "difference": 0
+            }
+
+        # Count mountain and valley creases at this vertex
         for crease in self.creases:
-            if crease.start == 0 or crease.end == 0 or crease.start == self.grid_size or crease.end == self.grid_size:
-                continue
             if crease.start == vertex or crease.end == vertex:
+                connected_creases.append(crease)
                 if crease.type == CreaseType.MOUNTAIN:
                     mountain_count += 1
                 elif crease.type == CreaseType.VALLEY:
                     valley_count += 1
 
-        return abs(mountain_count - valley_count) == 2
+        difference = abs(mountain_count - valley_count)
+        is_satisfied = difference == 2
 
-    def check_kawasaki_theorem(self, vertex: Point) -> bool:
-        """Check if Kawasaki's theorem is satisfied at a vertex."""
+        return is_satisfied, {
+            "is_edge_vertex": False,
+            "mountain_count": mountain_count,
+            "valley_count": valley_count,
+            "difference": difference,
+            "connected_creases": len(connected_creases)
+        }
 
-        if vertex.x == 0 or vertex.y == 0 or vertex.x == self.grid_size or vertex.y == self.grid_size:
-            # Edge vertex
-            return True
+
+    def _calculate_vector_angle(self, vec: np.ndarray) -> float:
+        """Calculate the angle of a vector relative to positive x-axis."""
+        return np.arctan2(vec[1], vec[0])
+
+
+    def _sort_vectors_counterclockwise(
+        self, vertex: Point, vertex_creases: List[Crease]
+    ) -> List[Tuple[np.ndarray, Crease]]:
+        """
+        Sort vectors around a vertex in counterclockwise order.
+        Returns list of (vector, crease) tuples to maintain crease association.
+        """
+        vectors_and_creases = []
+        for crease in vertex_creases:
+            if crease.start == vertex:
+                vec = np.array([crease.end.x - vertex.x, crease.end.y - vertex.y])
+            else:
+                vec = np.array([crease.start.x - vertex.x, crease.start.y - vertex.y])
+            vectors_and_creases.append((vec, crease))
+
+        # Sort by angle with respect to positive x-axis
+        angles = [self._calculate_vector_angle(v) for v, _ in vectors_and_creases]
+        sorted_pairs = sorted(zip(angles, vectors_and_creases))
+        return [vc for _, vc in sorted_pairs]
+
+
+    def _calculate_angle_between_vectors(self, v1: np.ndarray, v2: np.ndarray) -> float:
+        """
+        Calculate the signed angle between two vectors, positive for counterclockwise.
+        Returns angle in degrees.
+        """
+        # Calculate cross product to determine orientation
+        cross_product = np.cross(v1, v2)
+
+        # Calculate dot product and magnitudes
+        dot_product = np.dot(v1, v2)
+        magnitudes = np.linalg.norm(v1) * np.linalg.norm(v2)
+
+        # Handle numerical precision
+        cos_theta = np.clip(dot_product / magnitudes, -1.0, 1.0)
+        angle = np.arccos(cos_theta)
+
+        # Use cross product sign to determine orientation
+        if cross_product < 0:
+            angle = 2 * np.pi - angle
+
+        return np.degrees(angle)
+
+
+    def _calculate_angles(self, vertex: Point, vertex_creases: List[Crease]) -> List[float]:
+        """
+        Calculate angles between creases at a vertex.
+        Returns angles in degrees, sorted counterclockwise.
+        """
+        if len(vertex_creases) < 2:
+            return []
+
+        # Sort vectors counterclockwise and maintain crease association
+        vec_crease_pairs = self._sort_vectors_counterclockwise(vertex, vertex_creases)
+        vectors = [v for v, _ in vec_crease_pairs]
+
+        # Calculate angles between consecutive vectors
+        angles = []
+        for i in range(len(vectors)):
+            v1 = vectors[i]
+            v2 = vectors[(i + 1) % len(vectors)]
+            angle = self._calculate_angle_between_vectors(v1, v2)
+            angles.append(angle)
+
+        return angles
+
+
+    def check_kawasaki_theorem(self, vertex: Point) -> Tuple[bool, Dict]:
+        """
+        Check if Kawasaki's theorem is satisfied at a vertex.
+        Returns (is_satisfied, details_dict)
+
+        Kawasaki's theorem states that at any vertex, the sum of alternate
+        angles must be equal (sum of even-numbered angles = sum of odd-numbered angles).
+        """
+        if (
+            vertex.x == 0
+            or vertex.y == 0
+            or vertex.x == self.grid_size
+            or vertex.y == self.grid_size
+        ):
+            return True, {"is_edge_vertex": True, "angle_count": 0, "angle_difference": 0}
 
         # Get all creases connected to this vertex
         vertex_creases = [c for c in self.creases if c.start == vertex or c.end == vertex]
 
-        if len(vertex_creases) < 4:  # Need at least 4 creases for a vertex
-            return False
+        if len(vertex_creases) < 4:  # Need at least 4 creases for internal vertex
+            return False, {
+                "is_edge_vertex": False,
+                "angle_count": len(vertex_creases),
+                "error": "Insufficient creases",
+                "min_required": 4,
+            }
 
         # Calculate angles between creases
         angles = self._calculate_angles(vertex, vertex_creases)
-
-        # Sort angles
-        angles.sort()
+        angles.sort()  # Sort for consistent comparison
 
         # Sum alternate angles
         sum_odd = sum(angles[1::2])
         sum_even = sum(angles[::2])
+        angle_difference = abs(sum_odd - sum_even)
 
-        # Allow for some floating point imprecision
-        return abs(sum_odd - sum_even) < 0.001
+        # Allow for small floating point imprecision
+        is_satisfied = angle_difference < 0.001
 
-    def _calculate_angles(self, vertex: Point, vertex_creases: List[Crease]) -> List[float]:
-        """Calculate the angles between creases at a vertex."""
-        angles = []
-        for i, crease1 in enumerate(vertex_creases):
-            # Get vectors from vertex to crease endpoints
-            vec1 = self._get_vector(vertex, crease1)
-            # Get next crease
-            crease2 = vertex_creases[(i + 1) % len(vertex_creases)]
-            vec2 = self._get_vector(vertex, crease2)
-            # Calculate angle between vectors
-            angle = np.arccos(np.dot(vec1, vec2) / 
-                            (np.linalg.norm(vec1) * np.linalg.norm(vec2)))
-            angles.append(np.degrees(angle))
-        return angles
+        return is_satisfied, {
+            "is_edge_vertex": False,
+            "angle_count": len(angles),
+            "angles": angles,
+            "sum_odd": sum_odd,
+            "sum_even": sum_even,
+            "angle_difference": angle_difference,
+        }
 
-    def _get_vector(self, vertex: Point, crease: Crease) -> np.ndarray:
-        """Get the vector from the vertex to the crease endpoint."""
-        if crease.start == vertex:
-            return np.array([crease.end.x - vertex.x, crease.end.y - vertex.y])
-        else:
-            return np.array([crease.start.x - vertex.x, crease.start.y - vertex.y])
+    def is_flat_foldable(self) -> Tuple[bool, List[Dict]]:
+        """
+        Check if the entire pattern is flat-foldable and return detailed diagnostics.
+        Returns (is_foldable, list_of_violations)
+        """
+        is_foldable = True
+        violations = []
 
-    def is_flat_foldable(self) -> bool:
-        """Check if the entire pattern is flat-foldable."""
-        # Check each vertex satisfies both Maekawa and Kawasaki theorems
         for vertex in self.vertices:
-            if not (self.check_maekawa_theorem(vertex) and
-                self.check_kawasaki_theorem(vertex)):
-                return False
-        return True
+            maekawa_valid, maekawa_details = self.check_maekawa_theorem(vertex)
+            kawasaki_valid, kawasaki_details = self.check_kawasaki_theorem(vertex)
 
-def read_fold_file(filename: str) -> BoxPleatingPattern:
-    """Read a FOLD file and return a BoxPleatingPattern"""
-    with open(filename, 'r') as f:
-        fold_data = json.load(f)
-    return BoxPleatingPattern.from_fold(fold_data)
+            if not (maekawa_valid and kawasaki_valid):
+                is_foldable = False
+                violation = {
+                    "vertex": f"({vertex.x}, {vertex.y})",
+                    "maekawa_satisfied": maekawa_valid,
+                    "kawasaki_satisfied": kawasaki_valid,
+                    "maekawa_details": maekawa_details,
+                    "kawasaki_details": kawasaki_details,
+                }
+                violations.append(violation)
 
-def write_fold_file(pattern: BoxPleatingPattern, filename: str):
-    """Write a BoxPleatingPattern to a FOLD file"""
-    fold_data = pattern.to_fold()
-    with open(filename, 'w') as f:
-        json.dump(fold_data, f, indent=4)
+                print(f"\nViolation at vertex ({vertex.x}, {vertex.y}):")
+                if not maekawa_valid:
+                    print(f"  Maekawa's theorem violated:")
+                    print(f"    Mountain creases: {maekawa_details['mountain_count']}")
+                    print(f"    Valley creases: {maekawa_details['valley_count']}")
+                    print(f"    Difference: {maekawa_details['difference']} (should be 2)")
+
+                if not kawasaki_valid:
+                    print(f"  Kawasaki's theorem violated:")
+                    if "error" in kawasaki_details:
+                        print(f"    {kawasaki_details['error']}")
+                        print(
+                            f"    Found {kawasaki_details['angle_count']} creases, need {kawasaki_details['min_required']}"
+                        )
+                    else:
+                        print(f"    Sum of odd angles: {kawasaki_details['sum_odd']:.2f}°")
+                        print(
+                            f"    Sum of even angles: {kawasaki_details['sum_even']:.2f}°"
+                        )
+                        print(
+                            f"    Difference: {kawasaki_details['angle_difference']:.2f}°"
+                        )
+                        print(
+                            f"    Angles: {[f'{a:.1f}°' for a in kawasaki_details['angles']]}"
+                        )
+
+        return is_foldable, violations
+
 
 # Helper function to create basic molecules
 def create_temp_crease_pattern(pattern: BoxPleatingPattern, center: Point):
@@ -293,6 +374,7 @@ def create_temp_crease_pattern(pattern: BoxPleatingPattern, center: Point):
     pattern.add_crease(left, center, CreaseType.VALLEY)
     pattern.add_crease(right, center, CreaseType.MOUNTAIN)
 
+
 def main():
     # Example usage
     pattern = BoxPleatingPattern(10)  # 10x10 grid
@@ -303,6 +385,7 @@ def main():
 
     # Check if it's flat-foldable
     print(f"Pattern is flat-foldable: {pattern.is_flat_foldable()}")
+
 
 if __name__ == "__main__":
     main()

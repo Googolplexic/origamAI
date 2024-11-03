@@ -8,7 +8,6 @@ import numpy as np
 class FoldConverter:
 
     @staticmethod
-    @staticmethod
     def _compute_minimum_spacing(vertices: List[List[float]]) -> float:
         """
         Compute the minimum non-zero spacing between vertices in the pattern.
@@ -28,16 +27,24 @@ class FoldConverter:
                     min_spacing = min(min_spacing, dx)
                 if dy > 0:
                     min_spacing = min(min_spacing, dy)
-        # If no non-zero spacing found, return 1.0 as default
+
         return min_spacing if min_spacing != float("inf") else 1.0
 
     @staticmethod
-    def _compute_optimal_grid_size(vertices: List[List[float]]) -> int:
+    def _compute_optimal_grid_size(
+        vertices: List[List[float]], edges: List[List[int]]
+    ) -> int:
         """
         Compute the optimal grid size based on pattern geometry.
         """
         if not vertices:
-            return 4  # Default size for empty patterns
+            return 1  # Empty pattern
+
+        if len(vertices) == 1:
+            return 1  # Single point
+
+        if len(vertices) == 2 and len(edges) == 1:
+            return 2  # Single line (any orientation)
 
         # Find coordinate ranges
         xs = [x for x, _ in vertices]
@@ -52,8 +59,11 @@ class FoldConverter:
         # Calculate minimum required grid size to preserve smallest details
         min_required_size = math.ceil(max_range / min_spacing)
 
+        # No padding needed - the grid size should be exactly what's required
+        grid_size = min_required_size
+
         # Ensure grid size stays within reasonable bounds
-        grid_size = max(4, min(min_required_size, 96))
+        grid_size = max(2, min(grid_size, 50))
 
         return grid_size
 
@@ -144,6 +154,59 @@ class FoldConverter:
         return adjusted_points
 
     @staticmethod
+    def from_fold(fold_data: Dict) -> BoxPleatingPattern:
+        """Create BoxPleatingPattern from FOLD format with minimal grid size."""
+        vertices = fold_data["vertices_coords"]
+        for i in range(len(vertices)):
+            vertices[i] = [round(coord / 10) * 10 for coord in vertices[i]]
+        edges = fold_data["edges_vertices"]
+
+        # Compute optimal grid size without padding
+        grid_size = FoldConverter._compute_optimal_grid_size(vertices, edges)
+        pattern = BoxPleatingPattern(grid_size)
+
+        # Convert vertices to Points
+        vertex_points = []
+
+        # If we have vertices, normalize them to the grid
+        if vertices:
+            # Find bounds
+            xs = [x for x, _ in vertices]
+            ys = [y for _, y in vertices]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            x_range = max_x - min_x
+            y_range = max_y - min_y
+
+            for x, y in vertices:
+                # Normalize to [0, 1] range first
+                norm_x = (x - min_x) / (x_range if x_range != 0 else 1)
+                norm_y = (y - min_y) / (y_range if y_range != 0 else 1)
+
+                # Scale to grid size
+                grid_x = round(norm_x * (grid_size if grid_size > 1 else 1))
+                grid_y = round(norm_y * (grid_size if grid_size > 1 else 1))
+
+                vertex_points.append(Point(grid_x, grid_y))
+
+        # Add creases
+        for (v1_idx, v2_idx), assignment in zip(
+            edges, fold_data.get("edges_assignment", ["U"] * len(edges))
+        ):
+            if assignment == "M":
+                crease_type = CreaseType.MOUNTAIN
+            elif assignment == "V":
+                crease_type = CreaseType.VALLEY
+            else:
+                crease_type = CreaseType.NONE
+
+            start = vertex_points[v1_idx]
+            end = vertex_points[v2_idx]
+            pattern.add_crease(start, end, crease_type)
+
+        return pattern
+
+    @staticmethod
     def to_fold(pattern: BoxPleatingPattern) -> Dict:
         """
         Export BoxPleatingPattern to FOLD format.
@@ -205,65 +268,6 @@ class FoldConverter:
         }
 
     @staticmethod
-    def from_fold(fold_data: Dict) -> BoxPleatingPattern:
-        """Create BoxPleatingPattern from FOLD format with optimized grid size."""
-        vertices = fold_data["vertices_coords"]
-
-        # Compute scaling factors
-        scale_factor, min_x, min_y, center_x, center_y = (
-            FoldConverter._compute_scale_factors(vertices)
-        )
-
-        # Compute optimal grid size based on pattern geometry
-        grid_size = FoldConverter._compute_optimal_grid_size(vertices)
-
-        pattern = BoxPleatingPattern(grid_size)
-
-        # Convert vertices to Points
-        vertex_points = []
-        for x, y in vertices:
-            # Center the coordinates
-            centered_x = x - center_x
-            centered_y = y - center_y
-
-            # Scale to grid
-            grid_x = FoldConverter._snap_to_grid(
-                (centered_x / (400 / 2)) + 0.5, grid_size
-            )
-            grid_y = FoldConverter._snap_to_grid(
-                (centered_y / (400 / 2)) + 0.5, grid_size
-            )
-
-            # Ensure points stay within grid bounds
-            grid_x = max(0, min(grid_size, grid_x))
-            grid_y = max(0, min(grid_size, grid_y))
-
-            vertex_points.append(Point(grid_x, grid_y))
-
-        # Preserve parallel lines and 45-degree angles
-        vertex_points = FoldConverter._preserve_parallel_lines(vertex_points, grid_size)
-
-        # Add creases
-        edges = fold_data["edges_vertices"]
-        assignments = fold_data.get(
-            "edges_assignment", ["U"] * len(edges)
-        )  # Default to unassigned
-
-        for (v1_idx, v2_idx), assignment in zip(edges, assignments):
-            if assignment == "M":
-                crease_type = CreaseType.MOUNTAIN
-            elif assignment == "V":
-                crease_type = CreaseType.VALLEY
-            else:
-                crease_type = CreaseType.NONE
-
-            start = vertex_points[v1_idx]
-            end = vertex_points[v2_idx]
-            pattern.add_crease(start, end, crease_type)
-
-        return pattern
-
-    @staticmethod
     def save_fold(pattern: BoxPleatingPattern, filename: str):
         """Save BoxPleatingPattern to FOLD file."""
         fold_data = FoldConverter.to_fold(pattern)
@@ -284,9 +288,9 @@ def test_fold_converter():
     with open("input.fold", "r") as f:
         example_fold = json.load(f)
     pattern = FoldConverter.from_fold(example_fold)
-    print(pattern.grid_size, "grid size")
+    # print(pattern, "grid size")
 
-    print(f"Is flat-foldable: {pattern.is_flat_foldable()}")
+    print(f"Is flat-foldable: {pattern.is_flat_foldable()[0]}")
 
 
 if __name__ == "__main__":
