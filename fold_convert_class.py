@@ -1,14 +1,13 @@
 from typing import Dict, List, Union, Tuple, Set
 import json
-from app import BoxPleatingPattern, Point, CreaseType, Crease
+from bp_pattern_class import BoxPleatingPattern, Point, CreaseType, Crease
 import math
 import numpy as np
 
 
 class FoldConverter:
 
-    @staticmethod
-    def _compute_minimum_spacing(vertices: List[List[float]]) -> float:
+    def _compute_minimum_spacing(self, vertices: List[List[float]]) -> float:
         """
         Compute the minimum non-zero spacing between vertices in the pattern.
         """
@@ -30,9 +29,8 @@ class FoldConverter:
 
         return min_spacing if min_spacing != float("inf") else 1.0
 
-    @staticmethod
     def _compute_optimal_grid_size(
-        vertices: List[List[float]], edges: List[List[int]]
+        self, vertices: List[List[float]], edges: List[List[int]]
     ) -> int:
         """
         Compute the optimal grid size based on pattern geometry.
@@ -54,7 +52,7 @@ class FoldConverter:
         max_range = max(x_range, y_range)
 
         # Find minimum spacing between vertices
-        min_spacing = FoldConverter._compute_minimum_spacing(vertices)
+        min_spacing = self._compute_minimum_spacing(vertices)
 
         # Calculate minimum required grid size to preserve smallest details
         min_required_size = math.ceil(max_range / min_spacing)
@@ -68,7 +66,7 @@ class FoldConverter:
         return grid_size
 
     def _compute_scale_factors(
-        coords: List[List[float]],
+        self, coords: List[List[float]]
     ) -> Tuple[float, float, float, float, float]:
         """
         Compute scale factors and offsets for coordinate conversion.
@@ -99,30 +97,23 @@ class FoldConverter:
         else:
             # Use the larger dimension to determine scale
             max_dimension = max(width, height)
-            if max_dimension == 0:
-                scale_factor = 1.0
-            else:
-                # Target a reasonable size (e.g., 400 units total width/height)
-                scale_factor = 400 / max_dimension
+            scale_factor = 400 / max_dimension if max_dimension != 0 else 1.0
 
         return scale_factor, min_x, min_y, center_x, center_y
 
-    @staticmethod
-    def _snap_to_grid(value: float, grid_size: int) -> int:
+    def _snap_to_grid(self, value: float, grid_size: int) -> int:
         """
         Snap a value to the nearest grid point while preserving relative positions.
         """
-        # Scale to grid coordinates
         grid_value = value * grid_size
-        # Round to nearest integer while preserving order
         return int(round(grid_value))
 
-    @staticmethod
-    def _preserve_parallel_lines(points: List[Point], grid_size: int) -> List[Point]:
+    def _preserve_parallel_lines(
+        self, points: List[Point], grid_size: int
+    ) -> List[Point]:
         """
         Adjust points to preserve parallel lines and 45-degree angles.
         """
-        # Group points by x and y coordinates
         points_by_x = {}
         points_by_y = {}
         for p in points:
@@ -133,44 +124,32 @@ class FoldConverter:
             points_by_x[p.x].append(p)
             points_by_y[p.y].append(p)
 
-        # Adjust points that should be aligned
         adjusted_points = []
         for p in points:
             new_x = p.x
             new_y = p.y
 
-            # Check if point should be aligned vertically
             if len(points_by_x[p.x]) > 1:
-                # Snap to nearest grid line
                 new_x = round(p.x)
-
-            # Check if point should be aligned horizontally
             if len(points_by_y[p.y]) > 1:
-                # Snap to nearest grid line
                 new_y = round(p.y)
 
             adjusted_points.append(Point(new_x, new_y))
 
         return adjusted_points
 
-    @staticmethod
-    def from_fold(fold_data: Dict) -> BoxPleatingPattern:
+    def from_fold(self, fold_data: Dict) -> BoxPleatingPattern:
         """Create BoxPleatingPattern from FOLD format with minimal grid size."""
         vertices = fold_data["vertices_coords"]
         for i in range(len(vertices)):
             vertices[i] = [round(coord / 10) * 10 for coord in vertices[i]]
         edges = fold_data["edges_vertices"]
 
-        # Compute optimal grid size without padding
-        grid_size = FoldConverter._compute_optimal_grid_size(vertices, edges)
+        grid_size = self._compute_optimal_grid_size(vertices, edges)
         pattern = BoxPleatingPattern(grid_size)
 
-        # Convert vertices to Points
         vertex_points = []
-
-        # If we have vertices, normalize them to the grid
         if vertices:
-            # Find bounds
             xs = [x for x, _ in vertices]
             ys = [y for _, y in vertices]
             min_x, max_x = min(xs), max(xs)
@@ -179,26 +158,22 @@ class FoldConverter:
             y_range = max_y - min_y
 
             for x, y in vertices:
-                # Normalize to [0, 1] range first
                 norm_x = (x - min_x) / (x_range if x_range != 0 else 1)
                 norm_y = (y - min_y) / (y_range if y_range != 0 else 1)
 
-                # Scale to grid size
                 grid_x = round(norm_x * (grid_size if grid_size > 1 else 1))
                 grid_y = round(norm_y * (grid_size if grid_size > 1 else 1))
 
                 vertex_points.append(Point(grid_x, grid_y))
 
-        # Add creases
         for (v1_idx, v2_idx), assignment in zip(
             edges, fold_data.get("edges_assignment", ["U"] * len(edges))
         ):
+            crease_type = CreaseType.NONE
             if assignment == "M":
                 crease_type = CreaseType.MOUNTAIN
             elif assignment == "V":
                 crease_type = CreaseType.VALLEY
-            else:
-                crease_type = CreaseType.NONE
 
             start = vertex_points[v1_idx]
             end = vertex_points[v2_idx]
@@ -206,41 +181,106 @@ class FoldConverter:
 
         return pattern
 
-    @staticmethod
-    def to_fold(pattern: BoxPleatingPattern) -> Dict:
+    def _compute_faces_vertices(
+        self, vertices_coords: List[List[float]], edges_vertices: List[List[int]]
+    ) -> List[List[int]]:
         """
-        Export BoxPleatingPattern to FOLD format.
-        Uses standard 400x400 coordinate system centered at origin (-200 to +200).
+        Compute faces from edges following FOLD spec approach.
+        Returns list of vertex indices for each face in counterclockwise order.
         """
-        vertices_coords = []
-        vertex_map = {}  # Maps Point to vertex index
+        # First create vertices_vertices (adjacency list)
+        num_vertices = len(vertices_coords)
+        vertices_vertices = [[] for _ in range(num_vertices)]
+        for v1, v2 in edges_vertices:
+            vertices_vertices[v1].append(v2)
+            vertices_vertices[v2].append(v1)
 
-        # Convert grid coordinates to FOLD coordinates (-200 to +200)
+        # Sort vertices around each vertex counterclockwise
+        for v, neighbors in enumerate(vertices_vertices):
+            if not neighbors:
+                continue
+            # Calculate angles for sorting
+            angles = []
+            for n in neighbors:
+                dx = vertices_coords[n][0] - vertices_coords[v][0]
+                dy = vertices_coords[n][1] - vertices_coords[v][1]
+                angle = math.atan2(dy, dx)
+                angles.append((angle, n))
+            # Sort neighbors counterclockwise
+            sorted_pairs = sorted(angles)
+            vertices_vertices[v] = [n for _, n in sorted_pairs]
+
+        # Build next mapping from sorted neighbors
+        next_map = {}
+        for v, neighbors in enumerate(vertices_vertices):
+            for i, n in enumerate(neighbors):
+                prev = neighbors[(i - 1) % len(neighbors)]
+                next_map[(v, n)] = prev
+
+        # Find faces
+        faces = []
+        for start_edge in edges_vertices:
+            # Try both directions of each edge
+            for v1, v2 in [
+                (start_edge[0], start_edge[1]),
+                (start_edge[1], start_edge[0]),
+            ]:
+                face = [v1, v2]
+                while True:
+                    if len(face) > len(edges_vertices):
+                        break
+
+                    curr = face[-1]
+                    prev = face[-2]
+                    next_v = next_map.get((curr, prev))
+
+                    if next_v is None:
+                        break
+
+                    if next_v == face[0]:
+                        # Check if this forms a valid CCW face
+                        area = 0
+                        for i in range(len(face)):
+                            j = (i + 1) % len(face)
+                            vi = vertices_coords[face[i]]
+                            vj = vertices_coords[face[j]]
+                            area += vi[0] * vj[1] - vj[0] * vi[1]
+
+                        if area > 0 and len(face) >= 3:
+                            # Check if this is a new face (not just a cyclic rotation)
+                            face_set = frozenset(face)
+                            if not any(
+                                frozenset(existing) == face_set for existing in faces
+                            ):
+                                faces.append(face[:])
+                        break
+
+                    if next_v in face[:-1]:
+                        break
+
+                    face.append(next_v)
+
+        return faces
+
+    def to_fold(self, pattern: BoxPleatingPattern) -> Dict:
+        """Export BoxPleatingPattern to FOLD format."""
+        vertices_coords = []
+        vertex_map = {}
         for vertex in pattern.vertices:
             vertex_map[vertex] = len(vertices_coords)
-            # Convert from grid position to -200 to +200 range
             x = (vertex.x - pattern.grid_size / 2) * (400 / pattern.grid_size)
             y = (vertex.y - pattern.grid_size / 2) * (400 / pattern.grid_size)
             vertices_coords.append([x, y])
 
-        # Create edges information
         edges_vertices = []
         edges_assignment = []
         edges_foldAngle = []
-
-        # Initialize vertices_vertices (adjacency list)
-        vertices_vertices = [[] for _ in range(len(vertices_coords))]
 
         for crease in pattern.creases:
             v1 = vertex_map[crease.start]
             v2 = vertex_map[crease.end]
             edges_vertices.append([v1, v2])
 
-            # Update adjacency lists
-            vertices_vertices[v1].append(v2)
-            vertices_vertices[v2].append(v1)
-
-            # Convert CreaseType to FOLD assignment and fold angle
             if crease.type == CreaseType.MOUNTAIN:
                 edges_assignment.append("M")
                 edges_foldAngle.append(-180)
@@ -251,9 +291,17 @@ class FoldConverter:
                 edges_assignment.append("B")
                 edges_foldAngle.append(0)
 
-        # Sort the adjacency lists
-        for adj_list in vertices_vertices:
-            adj_list.sort()
+        # Compute faces
+        faces_vertices = self._compute_faces_vertices(vertices_coords, edges_vertices)
+
+        # Build vertices_vertices from edges
+        vertices_vertices = [[] for _ in range(len(vertices_coords))]
+        for v1, v2 in edges_vertices:
+            vertices_vertices[v1].append(v2)
+            vertices_vertices[v2].append(v1)
+
+        for neighbors in vertices_vertices:
+            neighbors.sort()
 
         return {
             "file_spec": 1.1,
@@ -265,33 +313,18 @@ class FoldConverter:
             "edges_assignment": edges_assignment,
             "edges_foldAngle": edges_foldAngle,
             "vertices_vertices": vertices_vertices,
+            "faces_vertices": faces_vertices,
         }
 
-    @staticmethod
-    def save_fold(pattern: BoxPleatingPattern, filename: str):
+    def save_fold(self, pattern: BoxPleatingPattern, filename: str):
         """Save BoxPleatingPattern to FOLD file."""
-        fold_data = FoldConverter.to_fold(pattern)
+
+        fold_data = self.to_fold(pattern)
         with open(filename, "w") as f:
             json.dump(fold_data, f, indent=2)
 
-    @staticmethod
-    def load_fold(filename: str) -> BoxPleatingPattern:
+    def load_fold(self, filename: str) -> BoxPleatingPattern:
         """Load BoxPleatingPattern from FOLD file."""
         with open(filename, "r") as f:
             fold_data = json.load(f)
-        return FoldConverter.from_fold(fold_data)
-
-
-def test_fold_converter():
-    # Test loading the example FOLD file
-    # Convert to BoxPleatingPattern
-    with open("input.fold", "r") as f:
-        example_fold = json.load(f)
-    pattern = FoldConverter.from_fold(example_fold)
-    # print(pattern, "grid size")
-
-    print(f"Is flat-foldable: {pattern.is_flat_foldable()[0]}")
-
-
-if __name__ == "__main__":
-    test_fold_converter()
+        return self.from_fold(fold_data)
