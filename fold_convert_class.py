@@ -142,7 +142,8 @@ class FoldConverter:
         """Create BoxPleatingPattern from FOLD format with minimal grid size."""
         vertices = fold_data["vertices_coords"]
         for i in range(len(vertices)):
-            vertices[i] = [round(coord / 10) * 10 for coord in vertices[i]]
+            vertices[i] = [coord * 12 for coord in vertices[i]]
+            vertices[i] = [round(coord * 10) / 10 for coord in vertices[i]]
         edges = fold_data["edges_vertices"]
 
         grid_size = self._compute_optimal_grid_size(vertices, edges)
