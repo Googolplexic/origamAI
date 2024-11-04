@@ -24,6 +24,7 @@ class BoxPleatingGenerator:
             start = Point(i, 0)
             end = Point(i, self.grid_size)
             pattern.add_crease(start, end, CreaseType.VALLEY)
+            pattern.add_crease(start, end, CreaseType.MOUNTAIN)
 
         # Add border creases
         topLeft = Point(0, 0)
@@ -121,22 +122,47 @@ class BoxPleatingGenerator:
 
 def main():
     # Example usage
-    generator = BoxPleatingGenerator(grid_size=4)
-    pattern = generator.generate_pattern(complexity=0.7)
+    # generator = BoxPleatingGenerator(grid_size=4)
+    # pattern = generator.generate_pattern(complexity=0.7)
 
     # Check if pattern is flat-foldable
-    is_foldable, violations = pattern.is_flat_foldable()
-    print(f"Generated pattern is flat-foldable: {is_foldable}")
-    if not is_foldable:
-        print("Violations found:")
-        for violation in violations:
-            print(
-                f"  At vertex ({violation['vertex']['x']}, {violation['vertex']['y']})"
-            )
+    # is_foldable, violations = pattern.is_flat_foldable()
+    # print(f"Generated pattern is flat-foldable: {is_foldable}")
+    # if not is_foldable:
+    #     print("Violations found:")
+    #     for violation in violations:
+    #         print(
+    #             f"  At vertex ({violation['vertex']['x']}, {violation['vertex']['y']})"
+    #         )
 
-    # Print pattern representation
-    print("\nPattern details:")
-    print(pattern)
+    # # Print pattern representation
+    # print("\nPattern details:")
+    # print(pattern)
+
+    pattern = BoxPleatingPattern(4)
+
+    # Add horizontal and vertical grid lines
+    i = 1
+    # Horizontal lines
+    # start = Point(0, i)
+    # end = Point(4, i)
+    # pattern.add_crease(start, end, CreaseType.MOUNTAIN)
+    # Vertical lines
+    start = Point(i, 0)
+    end = Point(i, 4)
+    pattern.add_crease(Point(1, 0), Point(4, 4), CreaseType.VALLEY)
+    pattern.add_crease(Point(0, 0), Point(4, 4), CreaseType.MOUNTAIN)
+
+    # Add border creases
+    topLeft = Point(0, 0)
+    topRight = Point(4, 0)
+    bottomLeft = Point(0, 4)
+    bottomRight = Point(4,4)
+    pattern.add_crease(topLeft, topRight, CreaseType.BORDER)
+    pattern.add_crease(topRight, bottomRight, CreaseType.BORDER)
+    pattern.add_crease(bottomRight, bottomLeft, CreaseType.BORDER)
+    pattern.add_crease(bottomLeft, topLeft, CreaseType.BORDER)
+
     fc = FoldConverter()
     fc.save_fold(pattern, "pattern.fold")
 
