@@ -14,7 +14,7 @@ class CreaseType(Enum):
 
 @dataclass
 class Point:
-    x: float  # Changed to float for FOLD compatibility
+    x: float  # Keep as float for calculations
     y: float
 
     def __hash__(self):
@@ -26,11 +26,21 @@ class Point:
     def __eq__(self, other):
         if not isinstance(other, Point):
             return False
-        return self.x == other.x and self.y == other.y
+        return abs(self.x - other.x) < 1e-10 and abs(self.y - other.y) < 1e-10
 
     @classmethod
     def from_list(cls, coords: List[float]) -> "Point":
         return cls(coords[0], coords[1])
+
+    @property
+    def grid_x(self) -> int:
+        """Return the x coordinate rounded to nearest integer for grid operations"""
+        return round(self.x)
+
+    @property
+    def grid_y(self) -> int:
+        """Return the y coordinate rounded to nearest integer for grid operations"""
+        return round(self.y)
 
 
 @dataclass
@@ -162,96 +172,266 @@ class BoxPleatingPattern:
 
         return False
 
+    def _find_intersection_point(self, p1: Point, p2: Point, p3: Point, p4: Point, epsilon: float = 1e-10) -> Optional[Point]:
+        """
+        Find the intersection point of two line segments if it exists.
+        Returns None if segments are parallel or don't intersect.
+        """
+        # Convert to numpy arrays for easier calculation
+        p1_arr = np.array([p1.x, p1.y])
+        p2_arr = np.array([p2.x, p2.y])
+        p3_arr = np.array([p3.x, p3.y])
+        p4_arr = np.array([p4.x, p4.y])
+
+        # Line segment vectors
+        v1 = p2_arr - p1_arr
+        v2 = p4_arr - p3_arr
+
+        # Cross product to check for parallel lines
+        cross = np.cross(v1, v2)
+        if abs(cross) < epsilon:  # Lines are parallel
+            return None
+
+        # Calculate intersection using parametric form
+        # p1 + t*v1 = p3 + s*v2
+        # Solve for t and s
+        x = p3_arr - p1_arr
+        A = np.array([v1, -v2]).T
+        try:
+            t, s = np.linalg.solve(A, x)
+            if 0 <= t <= 1 and 0 <= s <= 1:  # Check if intersection is within segments
+                intersection = p1_arr + t * v1
+                return Point(float(intersection[0]), float(intersection[1]))
+        except np.linalg.LinAlgError:
+            return None
+        return None
+
+    def _split_crease_at_point(self, crease: Crease, point: Point) -> List[Crease]:
+        """
+        Split a crease into two creases at the given point.
+        """
+        if point == crease.start or point == crease.end:
+            return [crease]
+
+        return [
+            Crease(crease.start, point, crease.type),
+            Crease(point, crease.end, crease.type)
+        ]
+
+    def _find_all_intersections(self, start: Point, end: Point, crease_type: CreaseType) -> List[Point]:
+        """
+        Find all intersection points between a proposed new crease and existing creases.
+        Returns a sorted list of intersection points along the new crease.
+        """
+        intersections = []
+        for existing_crease in self.creases:
+            # Skip if creases share an endpoint
+            if (start == existing_crease.start or start == existing_crease.end or
+                end == existing_crease.start or end == existing_crease.end):
+                continue
+
+            # Check for intersection
+            intersection = self._find_intersection_point(
+                start, end, 
+                existing_crease.start, existing_crease.end
+            )
+            if intersection:
+                intersections.append(intersection)
+
+        # Sort intersections by distance from start point
+        if intersections:
+            start_arr = np.array([start.x, start.y])
+            intersections.sort(key=lambda p: np.linalg.norm(
+                np.array([p.x, p.y]) - start_arr
+            ))
+
+        return intersections
+
+    def _segments_overlap(self, p1: Point, p2: Point, p3: Point, p4: Point, epsilon: float = 1e-10) -> bool:
+        """
+        Check if two line segments overlap (excluding shared endpoints).
+        Returns True if segments overlap, False otherwise.
+        """
+        # First handle shared endpoints - this is not considered overlap
+        if ((abs(p1.x - p3.x) < epsilon and abs(p1.y - p3.y) < epsilon) or
+            (abs(p1.x - p4.x) < epsilon and abs(p1.y - p4.y) < epsilon) or
+            (abs(p2.x - p3.x) < epsilon and abs(p2.y - p3.y) < epsilon) or
+            (abs(p2.x - p4.x) < epsilon and abs(p2.y - p4.y) < epsilon)):
+            return False
+
+        # For vertical lines
+        if abs(p2.x - p1.x) < epsilon and abs(p4.x - p3.x) < epsilon:
+            # Must be on same vertical line
+            if abs(p1.x - p3.x) >= epsilon:
+                return False
+                
+            # Get y-ranges
+            y_min1, y_max1 = min(p1.y, p2.y), max(p1.y, p2.y)
+            y_min2, y_max2 = min(p3.y, p4.y), max(p3.y, p4.y)
+            
+            # Check for overlap, allowing for shared endpoints
+            return (y_min1 <= y_max2 and y_max1 >= y_min2)
+
+        # For horizontal lines
+        if abs(p2.y - p1.y) < epsilon and abs(p4.y - p3.y) < epsilon:
+            # Must be on same horizontal line
+            if abs(p1.y - p3.y) >= epsilon:
+                return False
+                
+            # Get x-ranges
+            x_min1, x_max1 = min(p1.x, p2.x), max(p1.x, p2.x)
+            x_min2, x_max2 = min(p3.x, p4.x), max(p3.x, p4.x)
+            
+            # Check for overlap, allowing for shared endpoints
+            return (x_min1 <= x_max2 and x_max1 >= x_min2)
+
+        # For diagonal lines
+        # Calculate slopes
+        dx1, dy1 = p2.x - p1.x, p2.y - p1.y
+        dx2, dy2 = p4.x - p3.x, p4.y - p3.y
+        
+        if abs(dx1) < epsilon or abs(dx2) < epsilon:
+            return False  # Should have been caught by vertical line check
+            
+        slope1 = dy1 / dx1
+        slope2 = dy2 / dx2
+        
+        # Check if lines are parallel
+        if abs(slope1 - slope2) >= epsilon:
+            return False
+            
+        # Check if lines are collinear
+        # Calculate y-intercepts (b in y = mx + b)
+        b1 = p1.y - slope1 * p1.x
+        b2 = p3.y - slope2 * p3.x
+        
+        if abs(b1 - b2) >= epsilon:
+            return False
+            
+        # Get x-ranges
+        x_min1, x_max1 = min(p1.x, p2.x), max(p1.x, p2.x)
+        x_min2, x_max2 = min(p3.x, p4.x), max(p3.x, p4.x)
+        
+        # Check for overlap, allowing for shared endpoints
+        return (x_min1 <= x_max2 and x_max1 >= x_min2)
+
     def add_crease(
         self, start: Point, end: Point, crease_type: CreaseType, force: bool = False
     ) -> bool:
-        """Add a crease between two points if it follows box-pleating rules."""
+        """Add a crease between two points, splitting it at intersections if necessary."""
         if not self._is_valid_crease(start, end):
             return False
 
         # Create temporary crease for checking
         new_crease = Crease(start, end, crease_type)
 
-        # Check for intersections unless force is True
-        if not force:
-            for existing_crease in self.creases:
-                # Check if creases are collinear
-                v1 = Point(end.x - start.x, end.y - start.y)
-                v2 = Point(
-                    existing_crease.end.x - existing_crease.start.x,
-                    existing_crease.end.y - existing_crease.start.y,
+        # If force is True, add the crease without checking intersections
+        if force:
+            self.creases.append(new_crease)
+            if start not in self.vertices:
+                self.vertices.append(start)
+            if end not in self.vertices:
+                self.vertices.append(end)
+            self._update_grid(start, end, crease_type)
+            return True
+
+        for existing_crease in self.creases:
+            if self._segments_overlap(
+                start, end, existing_crease.start, existing_crease.end
+            ):
+                print(
+                    f"Overlapping parallel segments detected between ({start.x}, {start.y})->({end.x}, {end.y}) "
+                    f"and ({existing_crease.start.x}, {existing_crease.start.y})->"
+                    f"({existing_crease.end.x}, {existing_crease.end.y})"
                 )
+                return False
 
-                # Calculate cross product to check if vectors are parallel
-                cross_product = v1.x * v2.y - v1.y * v2.x
+        # Find all intersections with existing creases
+        intersections = self._find_all_intersections(start, end, crease_type)
 
-                if abs(cross_product) < 1e-10:  # Vectors are parallel
-                    # Check if the segments share any points or one is a subsegment of the other
-                    def point_in_segment(
-                        p: Point, seg_start: Point, seg_end: Point
-                    ) -> bool:
-                        """Check if point p lies on segment seg_start->seg_end"""
-                        # Check if point is within bounding box of segment
-                        if not (
-                            min(seg_start.x, seg_end.x) - 1e-10
-                            <= p.x
-                            <= max(seg_start.x, seg_end.x) + 1e-10
-                            and min(seg_start.y, seg_end.y) - 1e-10
-                            <= p.y
-                            <= max(seg_start.y, seg_end.y) + 1e-10
-                        ):
-                            return False
+        # If no intersections, add the crease normally
+        if not intersections:
+            self.creases.append(new_crease)
+            if start not in self.vertices:
+                self.vertices.append(start)
+            if end not in self.vertices:
+                self.vertices.append(end)
+            self._update_grid(start, end, crease_type)
+            return True
 
-                        # Check if point lies on the line
-                        if abs(seg_end.x - seg_start.x) < 1e-10:  # Vertical line
-                            return abs(p.x - seg_start.x) < 1e-10
-                        else:
-                            # Check if point lies on the line using slope
-                            slope = (seg_end.y - seg_start.y) / (
-                                seg_end.x - seg_start.x
-                            )
-                            expected_y = seg_start.y + slope * (p.x - seg_start.x)
-                            return abs(p.y - expected_y) < 1e-10
-
-                    # Check if any endpoint of either segment lies on the other segment
-                    if (
-                        point_in_segment(
-                            start, existing_crease.start, existing_crease.end
-                        )
-                        or point_in_segment(
-                            end, existing_crease.start, existing_crease.end
-                        )
-                        or point_in_segment(existing_crease.start, start, end)
-                        or point_in_segment(existing_crease.end, start, end)
-                    ):
-                        print(
-                            f"Overlap detected: New crease ({start.x}, {start.y})->({end.x}, {end.y}) "
-                            f"overlaps with existing crease ({existing_crease.start.x}, {existing_crease.start.y})->"
-                            f"({existing_crease.end.x}, {existing_crease.end.y})"
-                        )
-                        return False
-                else:
-                    # Not parallel - check for regular intersection
-                    if self._segments_intersect(
-                        start, end, existing_crease.start, existing_crease.end
-                    ):
-                        print(
-                            f"Intersection detected: New crease ({start.x}, {start.y})->({end.x}, {end.y}) "
-                            f"intersects with existing crease ({existing_crease.start.x}, {existing_crease.start.y})->"
-                            f"({existing_crease.end.x}, {existing_crease.end.y})"
-                        )
-                        return False
-
-        # If we get here, the crease is valid or force is True - add it
-        self.creases.append(new_crease)
+        # Add start point if it's not already a vertex
         if start not in self.vertices:
             self.vertices.append(start)
+
+        # Add all intersection points as vertices
+        for point in intersections:
+            if point not in self.vertices:
+                self.vertices.append(point)
+
+        # Add end point if it's not already a vertex
         if end not in self.vertices:
             self.vertices.append(end)
 
-        # Update grid
-        self._update_grid(start, end, crease_type)
+        # Create a list of points in order from start to end
+        points = [start] + intersections + [end]
+
+        # Create creases between consecutive points
+        for i in range(len(points) - 1):
+            p1, p2 = points[i], points[i + 1]
+            self.creases.append(Crease(p1, p2, crease_type))
+            self._update_grid(p1, p2, crease_type)
+
+        # Find and split any existing creases that intersect with the new segments
+        creases_to_remove = []
+        creases_to_add = []
+
+        for existing_crease in self.creases:
+            if existing_crease.type == crease_type and (
+                existing_crease.start == start or existing_crease.end == end
+            ):
+                continue  # Skip the creases we just added
+
+            intersecting_points = []
+            for point in intersections:
+                if self._point_on_crease(point, existing_crease):
+                    intersecting_points.append(point)
+
+            if intersecting_points:
+                creases_to_remove.append(existing_crease)
+                # Split the existing crease at all intersection points
+                current_segments = [existing_crease]
+                for point in intersecting_points:
+                    new_segments = []
+                    for segment in current_segments:
+                        new_segments.extend(self._split_crease_at_point(segment, point))
+                    current_segments = new_segments
+                creases_to_add.extend(current_segments)
+
+        # Remove and add the split creases
+        for crease in creases_to_remove:
+            if crease in self.creases:
+                self.creases.remove(crease)
+        self.creases.extend(creases_to_add)
+
         return True
+
+    def _point_on_crease(self, point: Point, crease: Crease, epsilon: float = 1e-10) -> bool:
+        """
+        Check if a point lies on a crease segment.
+        """
+        # Check if point is within bounding box of crease
+        if not (min(crease.start.x, crease.end.x) - epsilon <= point.x <= max(crease.start.x, crease.end.x) + epsilon and
+                min(crease.start.y, crease.end.y) - epsilon <= point.y <= max(crease.start.y, crease.end.y) + epsilon):
+            return False
+
+        # For vertical lines
+        if abs(crease.end.x - crease.start.x) < epsilon:
+            return abs(point.x - crease.start.x) < epsilon
+
+        # For other lines, check if point lies on line using slope
+        slope = (crease.end.y - crease.start.y) / (crease.end.x - crease.start.x)
+        expected_y = crease.start.y + slope * (point.x - crease.start.x)
+        return abs(point.y - expected_y) < epsilon
 
     def check_crease_intersections(self) -> List[Dict]:
         """
@@ -332,32 +512,90 @@ class BoxPleatingPattern:
 
         return is_valid, report
 
-    def _is_valid_crease(self, start: Point, end: Point) -> bool:
+    def _is_valid_crease(self, start: Point, end: Point, epsilon: float = 1e-10) -> bool:
         """Check if a proposed crease follows box-pleating rules."""
-        # Check if points are within grid
-        if not (
-            0 <= start.x <= self.grid_size
-            and 0 <= start.y <= self.grid_size
-            and 0 <= end.x <= self.grid_size
-            and 0 <= end.y <= self.grid_size
-        ):
+        # First, explicitly check that start and end points are different
+        if (abs(start.x - end.x) < epsilon and abs(start.y - end.y) < epsilon):
+            print(f"Invalid crease: Start point ({start.x}, {start.y}) equals end point ({end.x}, {end.y})")
             return False
 
-        # Check if it's a 45° or 90° angle
+        # Check if points are within grid
+        if not (0 <= start.x <= self.grid_size and 
+                0 <= start.y <= self.grid_size and 
+                0 <= end.x <= self.grid_size and 
+                0 <= end.y <= self.grid_size):
+            print(f"Invalid crease: Points out of grid bounds")
+            return False
+
+        # In box pleating, points should be at integer coordinates
+        if (abs(round(start.x) - start.x) > epsilon or 
+            abs(round(start.y) - start.y) > epsilon or 
+            abs(round(end.x) - end.x) > epsilon or 
+            abs(round(end.y) - end.y) > epsilon):
+            print(f"Invalid crease: Points not at integer coordinates")
+            return False
+
+        # Calculate differences
         dx = abs(end.x - start.x)
         dy = abs(end.y - start.y)
 
-        # Must be either 45° (dx == dy) or 90° (dx == 0 or dy == 0)
-        if not ((dx == dy) or (dx == 0) or (dy == 0)):
+        # Calculate length of crease
+        length = (dx * dx + dy * dy) ** 0.5
+        if length < epsilon:
+            print(f"Invalid crease: Zero length")
             return False
 
-        return True
+        # Check if it's a 45° or 90° angle
+        # For 90° angles: one of dx or dy should be 0, the other should be an integer
+        # For 45° angles: dx should equal dy and both should be integers
+        if abs(dx - dy) < epsilon:  # 45° angle
+            return abs(round(dx) - dx) < epsilon
+        elif dx < epsilon:  # Vertical line
+            return abs(round(dy) - dy) < epsilon
+        elif dy < epsilon:  # Horizontal line
+            return abs(round(dx) - dx) < epsilon
+        
+        print(f"Invalid crease: Not a 45° or 90° angle")
+        return False
 
     def _update_grid(self, start: Point, end: Point, crease_type: CreaseType):
         """Update the grid with the new crease."""
-        # For simplicity, just mark the endpoints
-        self.grid[start.x, start.y] = 1
-        self.grid[end.x, end.y] = 1
+        if self.grid is None:
+            return
+
+        # Convert coordinates to integers for grid indexing
+        start_x = start.grid_x
+        start_y = start.grid_y
+        end_x = end.grid_x
+        end_y = end.grid_y
+
+        # Ensure coordinates are within grid bounds
+        if not (
+            0 <= start_x <= self.grid_size
+            and 0 <= start_y <= self.grid_size
+            and 0 <= end_x <= self.grid_size
+            and 0 <= end_y <= self.grid_size
+        ):
+            print(
+                f"Warning: Attempted to update grid with out-of-bounds coordinates: ({start_x}, {start_y}) -> ({end_x}, {end_y})"
+            )
+            return
+
+        # Update grid with integer coordinates
+        self.grid[start_x, start_y] = 1
+        self.grid[end_x, end_y] = 1
+
+        # Optionally, we could also mark intermediate points along the crease
+        # This is useful for visualization and checking intersections
+        dx = end_x - start_x
+        dy = end_y - start_y
+        steps = max(abs(dx), abs(dy))
+        if steps > 0:
+            for i in range(steps + 1):
+                x = round(start_x + (dx * i) / steps)
+                y = round(start_y + (dy * i) / steps)
+                if 0 <= x <= self.grid_size and 0 <= y <= self.grid_size:
+                    self.grid[x, y] = 1
 
     def check_maekawa_theorem(self, vertex: Point) -> Tuple[bool, Dict]:
         """
