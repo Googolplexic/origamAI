@@ -252,12 +252,6 @@ class BoxPleatingPattern:
         Check if two line segments overlap (excluding shared endpoints).
         Returns True if segments overlap, False otherwise.
         """
-        # First handle shared endpoints - this is not considered overlap
-        if ((abs(p1.x - p3.x) < epsilon and abs(p1.y - p3.y) < epsilon) or
-            (abs(p1.x - p4.x) < epsilon and abs(p1.y - p4.y) < epsilon) or
-            (abs(p2.x - p3.x) < epsilon and abs(p2.y - p3.y) < epsilon) or
-            (abs(p2.x - p4.x) < epsilon and abs(p2.y - p4.y) < epsilon)):
-            return False
 
         # For vertical lines
         if abs(p2.x - p1.x) < epsilon and abs(p4.x - p3.x) < epsilon:
@@ -270,7 +264,7 @@ class BoxPleatingPattern:
             y_min2, y_max2 = min(p3.y, p4.y), max(p3.y, p4.y)
             
             # Check for overlap, allowing for shared endpoints
-            return (y_min1 <= y_max2 and y_max1 >= y_min2)
+            return (y_min1 < y_max2 and y_max1 > y_min2)
 
         # For horizontal lines
         if abs(p2.y - p1.y) < epsilon and abs(p4.y - p3.y) < epsilon:
@@ -283,7 +277,7 @@ class BoxPleatingPattern:
             x_min2, x_max2 = min(p3.x, p4.x), max(p3.x, p4.x)
             
             # Check for overlap, allowing for shared endpoints
-            return (x_min1 <= x_max2 and x_max1 >= x_min2)
+            return (x_min1 < x_max2 and x_max1 > x_min2)
 
         # For diagonal lines
         # Calculate slopes
@@ -313,7 +307,7 @@ class BoxPleatingPattern:
         x_min2, x_max2 = min(p3.x, p4.x), max(p3.x, p4.x)
         
         # Check for overlap, allowing for shared endpoints
-        return (x_min1 <= x_max2 and x_max1 >= x_min2)
+        return (x_min1 < x_max2 and x_max1 > x_min2)
 
     def add_crease(
         self, start: Point, end: Point, crease_type: CreaseType, force: bool = False

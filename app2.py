@@ -139,7 +139,6 @@ def main():
     # print("\nPattern details:")
     # print(pattern)
 
-
     pattern = BoxPleatingPattern(4)
 
     # Add horizontal and vertical grid lines
@@ -151,8 +150,8 @@ def main():
     # Vertical lines
     start = Point(i, 0)
     end = Point(i, 4)
-    pattern.add_crease(start, end, CreaseType.VALLEY)
-    pattern.add_crease(start, end, CreaseType.MOUNTAIN)
+    pattern.add_crease(Point(1, 0), Point(4, 4), CreaseType.VALLEY)
+    pattern.add_crease(Point(0, 0), Point(4, 4), CreaseType.MOUNTAIN)
 
     # Add border creases
     topLeft = Point(0, 0)
