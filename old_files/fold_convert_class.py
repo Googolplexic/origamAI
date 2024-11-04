@@ -1,6 +1,6 @@
 from typing import Dict, List, Union, Tuple, Set
 import json
-from bp_pattern_class import BoxPleatingPattern, Point, CreaseType, Crease
+from old_files.bp_pattern_class import BoxPleatingPattern, Point, CreaseType, Crease
 import math
 import numpy as np
 
